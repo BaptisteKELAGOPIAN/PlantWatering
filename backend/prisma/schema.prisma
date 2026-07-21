@@ -1,0 +1,51 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Modèle pour configurer chaque plante individuellement
+model Plant {
+  id               Int           @id @default(autoincrement())
+  pinNumber        Int           @unique // Numéro de pin GPIO associé (32, 33, 34, 35, 36, 39)
+  name             String        // Nom personnalisé (ex: "Bonsaï", "Basilic")
+  moistureMin      Float         // Seuil critique d'humidité (%) en dessous duquel arroser
+  wateringDuration Int           // Durée d'arrosage en secondes
+  autoWatering     Boolean       @default(true) // Arrosage auto activé ou manuel
+  imageUrl         String?       // URL de l'image de la plante ou mot-clé prédéfini
+  
+  // Relations
+  telemetries      Telemetry[]
+  waterings        WateringLog[]
+  
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+}
+
+// Modèle pour la configuration système globale
+model SystemConfig {
+  id              String   @id @default("system")
+  globalAutoWater Boolean  @default(true)
+}
+
+// Données d'humidité envoyées par l'ESP32
+model Telemetry {
+  id        String   @id @default(uuid())
+  plantId   Int
+  plant     Plant    @relation(fields: [plantId], references: [id], onDelete: Cascade)
+  moisture  Float    // Humidité en %
+  createdAt DateTime @default(now())
+}
+
+// Historique des arrosages effectués
+model WateringLog {
+  id        String   @id @default(uuid())
+  plantId   Int
+  plant     Plant    @relation(fields: [plantId], references: [id], onDelete: Cascade)
+  duration  Int      // Durée réelle d'arrosage en secondes
+  mode      String   // "AUTO" ou "MANUAL"
+  createdAt DateTime @default(now())
+}
