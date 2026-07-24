@@ -3,7 +3,7 @@ import cors from 'cors';
 import http from 'http';
 import dotenv from 'dotenv';
 import plantRoutes from './routes/plants';
-import { setupWebSocket, broadcastToDashboards } from './websocket';
+import { setupWebSocket, broadcastToDashboards, isRealEsp32Connected } from './websocket';
 import prisma from './prisma';
 
 dotenv.config();
@@ -11,14 +11,45 @@ dotenv.config();
 export const app = express();
 const port = process.env.PORT || 3001;
 
-// Configuration CORS - autorise le frontend en local et en production sur Vercel
+// Whitelist des origines : En production, UNIQUE MENT le frontend Vercel est autorisé
+const isProduction = process.env.NODE_ENV === 'production';
+const allowedOrigins = (isProduction
+  ? [process.env.FRONTEND_URL]
+  : [
+      'http://localhost:3000',
+      'http://localhost:5173',
+      'http://127.0.0.1:3000',
+      process.env.FRONTEND_URL
+    ]
+).filter(Boolean) as string[];
+
 app.use(cors({
-  origin: '*', // En production, il est recommandé de spécifier l'URL de Vercel
+  origin: (origin, callback) => {
+    // Autoriser les requêtes sans origine (ESP32 physique, cURL, outils de dev)
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      console.warn(`[CORS Bloqué] Origine non autorisée : ${origin}`);
+      callback(new Error('Accès refusé par la politique CORS'));
+    }
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: true
 }));
 
+import { ADMIN_PASSWORD } from './middleware/auth';
+
 app.use(express.json());
+
+// Endpoint d'authentification Admin
+app.post('/api/auth/login', (req, res) => {
+  const { password } = req.body;
+  if (password === ADMIN_PASSWORD) {
+    res.json({ success: true, token: ADMIN_PASSWORD });
+  } else {
+    res.status(401).json({ success: false, error: 'Mot de passe administrateur incorrect' });
+  }
+});
 
 // Routes API REST
 app.use('/api/plants', plantRoutes);
@@ -40,6 +71,11 @@ function startSimulation() {
   
   setInterval(async () => {
     try {
+      // Si une vraie carte ESP32 physique est connectée, suspendre le simulateur fictif
+      if (isRealEsp32Connected()) {
+        return;
+      }
+
       const plants = await prisma.plant.findMany();
       const systemConfig = await prisma.systemConfig.findUnique({
         where: { id: 'system' }

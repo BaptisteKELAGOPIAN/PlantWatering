@@ -12,7 +12,10 @@ import {
   RotateCcw,
   Save,
   X,
-  Gauge
+  Gauge,
+  Lock,
+  Key,
+  ShieldCheck
 } from 'lucide-react';
 
 interface Telemetry {
@@ -43,7 +46,7 @@ interface Plant {
 export default function App() {
   const [plants, setPlants] = useState<Plant[]>([]);
   const [backendConnected, setBackendConnected] = useState(false);
-  const [esp32Connected, setEsp32Connected] = useState(false);
+  const [isRealEsp32, setIsRealEsp32] = useState(false);
   const [selectedPlantForHistory, setSelectedPlantForHistory] = useState<Plant | null>(null);
   const [historyData, setHistoryData] = useState<{ telemetries: Telemetry[]; waterings: WateringLog[] }>({ telemetries: [], waterings: [] });
   const [editingPlant, setEditingPlant] = useState<Plant | null>(null);
@@ -58,6 +61,13 @@ export default function App() {
   
   // État de l'arrosage automatique global
   const [globalAutoWater, setGlobalAutoWater] = useState(true);
+  
+  // Authentification et Sécurité (Mode Démo vs Mode Admin)
+  const [adminToken, setAdminToken] = useState<string>(() => localStorage.getItem('adminToken') || '');
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authLoading, setAuthLoading] = useState(false);
   
   interface PlantStats {
     lastWatering: WateringLog | null;
@@ -134,30 +144,70 @@ export default function App() {
     }
   };
 
-  // Toggler l'arrosage automatique global
+  // Soumission du mot de passe Admin
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthLoading(true);
+    setAuthError(null);
+    try {
+      const res = await fetch(`${backendUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: passwordInput })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        localStorage.setItem('adminToken', data.token);
+        setAdminToken(data.token);
+        setShowAuthModal(false);
+        setPasswordInput('');
+      } else {
+        setAuthError(data.error || 'Mot de passe incorrect');
+      }
+    } catch (err) {
+      setAuthError('Erreur de connexion au serveur');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('adminToken');
+    setAdminToken('');
+  };
+
+  // Toggler l'arrosage automatique global (Protégé par Admin)
   const toggleGlobalAutoWater = async () => {
+    if (!adminToken) {
+      setShowAuthModal(true);
+      return;
+    }
     try {
       const res = await fetch(`${backendUrl}/api/plants/system/config`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${adminToken}`
+        },
         body: JSON.stringify({ globalAutoWater: !globalAutoWater })
       });
       if (res.ok) {
         const config = await res.json();
         setGlobalAutoWater(config.globalAutoWater);
+      } else if (res.status === 401) {
+        handleLogout();
+        setShowAuthModal(true);
       }
     } catch (err) {
       console.error("Erreur lors de la modification de la config globale:", err);
     }
   };
 
-  // 2. Connexion WebSocket et Ping régulier
+  // 2. Connexion WebSocket et Test de santé initial
   useEffect(() => {
     checkHealth();
     fetchPlants();
     fetchSystemConfig();
-
-    const healthInterval = setInterval(checkHealth, 10000);
 
     const connectWebSocket = () => {
       console.log('Connexion au WebSocket...', wsUrl);
@@ -176,6 +226,11 @@ export default function App() {
           
           if (message.type === 'INIT_STATE') {
             setPlants(message.plants);
+            if (message.isRealEsp32 !== undefined) {
+              setIsRealEsp32(message.isRealEsp32);
+            }
+          } else if (message.type === 'ESP32_STATUS_UPDATE') {
+            setIsRealEsp32(Boolean(message.isRealEsp32));
           } else if (message.type === 'TELEMETRY_UPDATE') {
             // Mettre à jour l'humidité en direct pour la plante concernée
             setPlants(prev => prev.map(p => {
@@ -187,8 +242,6 @@ export default function App() {
               }
               return p;
             }));
-            // L'ESP32 est actif si on reçoit de la télémesure
-            setEsp32Connected(true);
           } else if (message.type === 'WATERING_EVENT') {
             // Indiquer qu'un arrosage est en cours/terminé
             const { plantId, duration } = message;
@@ -231,20 +284,24 @@ export default function App() {
     connectWebSocket();
 
     return () => {
-      clearInterval(healthInterval);
       if (socketRef.current) {
         socketRef.current.close();
       }
     };
   }, []);
 
-  // Déclencher un arrosage manuel via WebSocket
+  // Déclencher un arrosage manuel via WebSocket (Protégé par Admin)
   const triggerWatering = (plantId: number, duration: number) => {
+    if (!adminToken) {
+      setShowAuthModal(true);
+      return;
+    }
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify({
         type: 'TRIGGER_WATERING',
         plantId,
-        duration
+        duration,
+        token: adminToken
       }));
       // Activer l'état d'arrosage localement en prévision
       setIsWateringMap(prev => ({ ...prev, [plantId]: true }));
@@ -256,15 +313,23 @@ export default function App() {
     }
   };
 
-  // Mettre à jour la configuration via REST
+  // Mettre à jour la configuration via REST (Protégé par Admin)
   const saveConfig = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingPlant) return;
 
+    if (!adminToken) {
+      setShowAuthModal(true);
+      return;
+    }
+
     try {
       const res = await fetch(`${backendUrl}/api/plants/${editingPlant.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${adminToken}`
+        },
         body: JSON.stringify({
           name: editingPlant.name,
           moistureMin: editingPlant.moistureMin,
@@ -278,6 +343,9 @@ export default function App() {
         const updated = await res.json();
         setPlants(prev => prev.map(p => p.id === updated.id ? { ...p, ...updated } : p));
         setEditingPlant(null);
+      } else if (res.status === 401) {
+        handleLogout();
+        setShowAuthModal(true);
       }
     } catch (err) {
       console.error("Erreur de sauvegarde de configuration:", err);
@@ -364,6 +432,27 @@ export default function App() {
         <div className="status-container">
           {wsError && <div className="ws-error-badge">{wsError}</div>}
           
+          {/* Badge Mode Admin / Démo */}
+          {adminToken ? (
+            <button 
+              onClick={handleLogout}
+              className="status-badge admin-badge logged-in"
+              title="Vous êtes connecté en Administrateur. Cliquez pour vous déconnecter."
+            >
+              <ShieldCheck className="status-icon" />
+              <span>Admin (Déconnexion)</span>
+            </button>
+          ) : (
+            <button 
+              onClick={() => setShowAuthModal(true)}
+              className="status-badge admin-badge demo-mode"
+              title="Cliquez pour déverrouiller le Mode Administrateur"
+            >
+              <Lock className="status-icon" />
+              <span>Mode Démo (Se connecter)</span>
+            </button>
+          )}
+
           <button 
             onClick={toggleGlobalAutoWater}
             className={`status-badge global-auto-toggle ${globalAutoWater ? 'active' : 'inactive'}`}
@@ -378,9 +467,11 @@ export default function App() {
             <span>Serveur : {backendConnected ? 'En ligne' : 'Hors ligne'}</span>
           </div>
 
-          <div className={`status-badge ${esp32Connected && backendConnected ? 'online' : 'offline'}`}>
+          <div className={`status-badge ${!backendConnected ? 'offline' : (isRealEsp32 ? 'online' : 'simulator')}`}>
             <Activity className="status-icon" />
-            <span>ESP32 : {esp32Connected && backendConnected ? 'Simulateur' : 'Non détecté'}</span>
+            <span>
+              ESP32 : {!backendConnected ? 'Non connecté' : (isRealEsp32 ? 'Physique' : 'Mode Simulateur')}
+            </span>
           </div>
         </div>
       </header>
@@ -1014,6 +1105,59 @@ export default function App() {
                 )}
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal d'Authentification Administrateur */}
+      {showAuthModal && (
+        <div className="modal-overlay">
+          <div className="modal-content auth-modal">
+            <div className="modal-header">
+              <div className="modal-title-group">
+                <ShieldCheck className="icon-header text-primary" />
+                <h3>Accès Administrateur</h3>
+              </div>
+              <button onClick={() => setShowAuthModal(false)} className="btn-close">
+                <X size={18} />
+              </button>
+            </div>
+            
+            <form onSubmit={handleLogin} className="auth-form">
+              <p className="auth-description">
+                Vous êtes actuellement en <strong>Mode Démo</strong> (consultation libre). Entrez le mot de passe Administrateur pour modifier les réglages ou déclencher l'arrosage.
+              </p>
+              
+              {authError && (
+                <div className="auth-error-banner">
+                  <AlertTriangle size={16} />
+                  <span>{authError}</span>
+                </div>
+              )}
+
+              <div className="form-group">
+                <label>
+                  <Key size={14} className="icon-inline" /> Mot de Passe Administrateur
+                </label>
+                <input 
+                  type="password" 
+                  value={passwordInput} 
+                  onChange={e => setPasswordInput(e.target.value)} 
+                  placeholder="Entrez votre mot de passe..."
+                  autoFocus
+                  required
+                />
+              </div>
+
+              <div className="modal-actions">
+                <button type="button" onClick={() => setShowAuthModal(false)} className="btn-secondary">
+                  Rester en Démo
+                </button>
+                <button type="submit" disabled={authLoading} className="btn-primary">
+                  {authLoading ? 'Vérification...' : 'Déverrouiller l\'accès'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

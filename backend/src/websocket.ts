@@ -2,10 +2,22 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { IncomingMessage } from 'http';
 import prisma from './prisma';
 import url from 'url';
+import { ADMIN_PASSWORD } from './middleware/auth';
 
 // Ensembles pour suivre les connexions actives
 const dashboardClients = new Set<WebSocket>();
 let esp32Client: WebSocket | null = null;
+
+export function isRealEsp32Connected(): boolean {
+  return esp32Client !== null && esp32Client.readyState === WebSocket.OPEN;
+}
+
+export function broadcastEsp32Status() {
+  broadcastToDashboards({
+    type: 'ESP32_STATUS_UPDATE',
+    isRealEsp32: isRealEsp32Connected()
+  });
+}
 
 export function setupWebSocket(server: any) {
   const wss = new WebSocketServer({ noServer: true });
@@ -26,6 +38,24 @@ export function setupWebSocket(server: any) {
   wss.on('connection', async (ws: WebSocket, request: IncomingMessage) => {
     const parameters = url.parse(request.url || '', true).query;
     const clientType = parameters.clientType; // "dashboard" ou "esp32"
+    const origin = request.headers.origin;
+
+    const isProduction = process.env.NODE_ENV === 'production';
+    const allowedOrigins = (isProduction
+      ? [process.env.FRONTEND_URL]
+      : [
+          'http://localhost:3000',
+          'http://localhost:5173',
+          'http://127.0.0.1:3000',
+          process.env.FRONTEND_URL
+        ]
+    ).filter(Boolean) as string[];
+
+    if (clientType === 'dashboard' && origin && !allowedOrigins.includes(origin)) {
+      console.warn(`[WebSocket Bloqué] Origine non autorisée : ${origin}`);
+      ws.close(1008, 'Origine non autorisée');
+      return;
+    }
 
     console.log(`Nouvelle connexion WebSocket établie. Type: ${clientType}`);
 
@@ -35,13 +65,15 @@ export function setupWebSocket(server: any) {
         esp32Client.close();
       }
       esp32Client = ws;
-      console.log('ESP32 connecté en WebSocket');
+      console.log('ESP32 Physique connecté en WebSocket');
+      broadcastEsp32Status();
 
       ws.on('close', () => {
-        console.log('ESP32 déconnecté');
+        console.log('ESP32 Physique déconnecté');
         if (esp32Client === ws) {
           esp32Client = null;
         }
+        broadcastEsp32Status();
       });
     } else {
       // Par défaut, c'est un client Dashboard
@@ -58,7 +90,11 @@ export function setupWebSocket(server: any) {
             }
           }
         });
-        ws.send(JSON.stringify({ type: 'INIT_STATE', plants }));
+        ws.send(JSON.stringify({ 
+          type: 'INIT_STATE', 
+          plants,
+          isRealEsp32: isRealEsp32Connected() 
+        }));
 
         // Envoyer la configuration globale
         const systemConfig = await prisma.systemConfig.findUnique({
@@ -85,7 +121,7 @@ export function setupWebSocket(server: any) {
         if (clientType === 'esp32') {
           await handleEsp32Message(data, ws);
         } else {
-          await handleDashboardMessage(data);
+          await handleDashboardMessage(data, ws);
         }
       } catch (err) {
         console.error('Erreur lors du traitement du message WS:', err);
@@ -190,10 +226,20 @@ async function handleEsp32Message(data: any, ws: WebSocket) {
 }
 
 // Traite les messages reçus du Dashboard
-async function handleDashboardMessage(data: any) {
+async function handleDashboardMessage(data: any, ws?: WebSocket) {
   // Déclencher un arrosage manuel depuis le dashboard
   if (data.type === 'TRIGGER_WATERING') {
-    const { plantId, duration } = data;
+    const { plantId, duration, token } = data;
+
+    if (token !== ADMIN_PASSWORD) {
+      if (ws) {
+        ws.send(JSON.stringify({
+          type: 'ERROR',
+          message: 'Arrosage manuel impossible en mode Démo. Veuillez vous connecter en Administrateur.'
+        }));
+      }
+      return;
+    }
 
     const plant = await prisma.plant.findUnique({
       where: { id: Number(plantId) }

@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../prisma';
 import { broadcastToDashboards } from '../websocket';
+import { requireAdmin } from '../middleware/auth';
 
 const router = Router();
 
@@ -40,8 +41,8 @@ router.get('/system/config', async (req: Request, res: Response) => {
   }
 });
 
-// 8. Toggler le mode automatique global
-router.put('/system/config', async (req: Request, res: Response) => {
+// 8. Toggler le mode automatique global (Nécessite Admin)
+router.put('/system/config', requireAdmin, async (req: Request, res: Response) => {
   const { globalAutoWater } = req.body;
   try {
     const updatedConfig = await prisma.systemConfig.update({
@@ -157,8 +158,8 @@ router.get('/global/stats', async (req: Request, res: Response) => {
   }
 });
 
-// 2. Mettre à jour la configuration d'une plante
-router.put('/:id', async (req: Request, res: Response) => {
+// 2. Mettre à jour la configuration d'une plante (Nécessite Admin)
+router.put('/:id', requireAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
   const { name, moistureMin, wateringDuration, autoWatering, imageUrl } = req.body;
 
