@@ -535,11 +535,17 @@ export default function App() {
               const isWatering = isWateringMap[plant.id];
 
               // Déterminer la couleur de statut
+              const isOfflineAdmin = adminToken && !isRealEsp32;
+
               let statusClass = 'wet';
               let statusText = 'Humide';
               let StatusIcon = CheckCircle2;
 
-              if (isCritical) {
+              if (isOfflineAdmin) {
+                statusClass = 'offline-plant'; // Nouvelle classe CSS
+                statusText = 'Hors Ligne';
+                StatusIcon = WifiOff;
+              } else if (isCritical) {
                 statusClass = 'critical';
                 statusText = 'Critique (Sec)';
                 StatusIcon = AlertTriangle;
@@ -555,7 +561,7 @@ export default function App() {
                   {/* Photo de la Plante */}
                   {plant.imageUrl && (
                     <div className="plant-image-container">
-                      <img src={plant.imageUrl} alt={plant.name} className="plant-card-image" />
+                      <img src={plant.imageUrl} alt={plant.name} className="plant-card-image" style={{ filter: isOfflineAdmin ? 'grayscale(100%)' : 'none' }} />
                       <div className="plant-image-overlay"></div>
                     </div>
                   )}
@@ -575,7 +581,7 @@ export default function App() {
                   {/* Gauge Section */}
                   <div className="gauge-section">
                     <div className="moisture-display">
-                      <span className="moisture-value">{currentMoisture.toFixed(1)}%</span>
+                      <span className="moisture-value">{isOfflineAdmin ? '--' : currentMoisture.toFixed(1)}%</span>
                       <span className="moisture-label">Humidité du sol</span>
                     </div>
                     
@@ -583,7 +589,7 @@ export default function App() {
                     <div className="progress-bar-container">
                       <div 
                         className={`progress-bar-fill ${statusClass}`} 
-                        style={{ width: `${Math.min(Math.max(currentMoisture, 0), 100)}%` }}
+                        style={{ width: `${isOfflineAdmin ? 0 : Math.min(Math.max(currentMoisture, 0), 100)}%` }}
                       ></div>
                       {/* Seuil minimum indicator */}
                       <div 

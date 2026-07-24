@@ -229,6 +229,11 @@ h1 {
   box-shadow: 0 8px 32px 0 rgba(245, 158, 11, 0.05);
 }
 
+.plant-card.offline-plant {
+  opacity: 0.6;
+  filter: grayscale(40%);
+}
+
 .plant-card.critical {
   border-color: rgba(239, 68, 68, 0.4);
   box-shadow: 0 8px 32px 0 rgba(239, 68, 68, 0.08);
@@ -290,6 +295,11 @@ h1 {
   color: var(--color-danger);
 }
 
+.status-pill.offline-plant {
+  background-color: rgba(255, 255, 255, 0.05);
+  color: var(--text-muted);
+}
+
 .icon-inline {
   flex-shrink: 0;
 }
@@ -347,6 +357,10 @@ h1 {
 
 .progress-bar-fill.critical {
   background: linear-gradient(to right, var(--color-warning), var(--color-danger));
+}
+
+.progress-bar-fill.offline-plant {
+  background: rgba(255, 255, 255, 0.2);
 }
 
 .threshold-line {
