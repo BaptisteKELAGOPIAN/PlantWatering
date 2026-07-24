@@ -11,26 +11,26 @@ dotenv.config();
 export const app = express();
 const port = process.env.PORT || 3001;
 
-// Whitelist des origines : En production, UNIQUE MENT le frontend Vercel est autorisé
-const isProduction = process.env.NODE_ENV === 'production';
-const allowedOrigins = (isProduction
-  ? [process.env.FRONTEND_URL]
-  : [
-      'http://localhost:3000',
-      'http://localhost:5173',
-      'http://127.0.0.1:3000',
-      process.env.FRONTEND_URL
-    ]
-).filter(Boolean) as string[];
-
+// Whitelist des origines lues dynamiquement depuis les variables d'environnement
 app.use(cors({
   origin: (origin, callback) => {
-    // Autoriser les requêtes sans origine (ESP32 physique, cURL, outils de dev)
-    if (!origin || allowedOrigins.includes(origin)) {
+    if (!origin) return callback(null, true);
+
+    const cleanOrigin = origin.trim().replace(/\/+$/, '');
+    const cleanFrontendUrl = process.env.FRONTEND_URL ? process.env.FRONTEND_URL.trim().replace(/\/+$/, '') : '';
+
+    const origins = [
+      cleanFrontendUrl,
+      'http://localhost:3000',
+      'http://localhost:5173',
+      'http://127.0.0.1:3000'
+    ].filter(Boolean);
+
+    if (origins.includes(cleanOrigin)) {
       callback(null, true);
     } else {
-      console.warn(`[CORS Bloqué] Origine non autorisée : ${origin}`);
-      callback(new Error('Accès refusé par la politique CORS'));
+      console.warn(`[CORS Rejeté] Origine non autorisée: "${cleanOrigin}"`);
+      callback(null, false);
     }
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE'],

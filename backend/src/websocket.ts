@@ -38,21 +38,19 @@ export function setupWebSocket(server: any) {
   wss.on('connection', async (ws: WebSocket, request: IncomingMessage) => {
     const parameters = url.parse(request.url || '', true).query;
     const clientType = parameters.clientType; // "dashboard" ou "esp32"
-    const origin = request.headers.origin;
+    const rawOrigin = request.headers.origin;
+    const cleanOrigin = rawOrigin ? rawOrigin.trim().replace(/\/+$/, '') : '';
+    const cleanFrontendUrl = process.env.FRONTEND_URL ? process.env.FRONTEND_URL.trim().replace(/\/+$/, '') : '';
 
-    const isProduction = process.env.NODE_ENV === 'production';
-    const allowedOrigins = (isProduction
-      ? [process.env.FRONTEND_URL]
-      : [
-          'http://localhost:3000',
-          'http://localhost:5173',
-          'http://127.0.0.1:3000',
-          process.env.FRONTEND_URL
-        ]
-    ).filter(Boolean) as string[];
+    const origins = [
+      cleanFrontendUrl,
+      'http://localhost:3000',
+      'http://localhost:5173',
+      'http://127.0.0.1:3000'
+    ].filter(Boolean);
 
-    if (clientType === 'dashboard' && origin && !allowedOrigins.includes(origin)) {
-      console.warn(`[WebSocket Bloqué] Origine non autorisée : ${origin}`);
+    if (clientType === 'dashboard' && cleanOrigin && !origins.includes(cleanOrigin)) {
+      console.warn(`[WebSocket Bloqué] Origine non autorisée : ${cleanOrigin}`);
       ws.close(1008, 'Origine non autorisée');
       return;
     }
