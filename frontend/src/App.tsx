@@ -84,6 +84,26 @@ export default function App() {
     ? 'wss://plantwatering-production.up.railway.app/ws?clientType=dashboard'
     : `ws://${window.location.hostname}:3001/ws?clientType=dashboard`);
 
+  // 0. Test de santé du serveur (Ping /health)
+  const checkHealth = async () => {
+    try {
+      const res = await fetch(`${backendUrl}/health`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status === 'ok') {
+          setBackendConnected(true);
+          return true;
+        }
+      }
+      setBackendConnected(false);
+      return false;
+    } catch (err) {
+      console.error("Serveur indisponible ou hors ligne (Ping /health échoué):", err);
+      setBackendConnected(false);
+      return false;
+    }
+  };
+
   // 1. Charger les plantes initialement par API REST
   const fetchPlants = async () => {
     try {
@@ -92,6 +112,8 @@ export default function App() {
         const data = await res.json();
         setPlants(data);
         setBackendConnected(true);
+      } else {
+        setBackendConnected(false);
       }
     } catch (err) {
       console.error("Erreur lors de la récupération des plantes:", err);
@@ -129,10 +151,13 @@ export default function App() {
     }
   };
 
-  // 2. Connexion WebSocket
+  // 2. Connexion WebSocket et Ping régulier
   useEffect(() => {
+    checkHealth();
     fetchPlants();
     fetchSystemConfig();
+
+    const healthInterval = setInterval(checkHealth, 10000);
 
     const connectWebSocket = () => {
       console.log('Connexion au WebSocket...', wsUrl);
@@ -206,6 +231,7 @@ export default function App() {
     connectWebSocket();
 
     return () => {
+      clearInterval(healthInterval);
       if (socketRef.current) {
         socketRef.current.close();
       }
