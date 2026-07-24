@@ -132,7 +132,8 @@ function startSimulation() {
           plantId: plant.id,
           pinNumber: plant.pinNumber,
           moisture: Number(currentMoisture.toFixed(1)),
-          createdAt: new Date()
+          createdAt: new Date(),
+          isSimulated: true
         });
 
         // 4. Arrosage automatique simulé
@@ -149,7 +150,8 @@ function startSimulation() {
             pinNumber: plant.pinNumber,
             duration: plant.wateringDuration,
             mode: 'AUTO',
-            createdAt: new Date()
+            createdAt: new Date(),
+            isSimulated: true
           });
 
           broadcastToDashboards({
@@ -157,7 +159,8 @@ function startSimulation() {
             plantId: plant.id,
             pinNumber: plant.pinNumber,
             moisture: 82.0,
-            createdAt: new Date()
+            createdAt: new Date(),
+            isSimulated: true
           });
         }
       }

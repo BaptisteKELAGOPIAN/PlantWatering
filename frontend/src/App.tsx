@@ -223,6 +223,13 @@ export default function App() {
       ws.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data);
+
+          // Si on est connecté en Admin, on ignore volontairement les messages du simulateur
+          // L'interface restera figée sur les vraies dernières données de l'ESP32
+          const localAdminToken = localStorage.getItem('adminToken');
+          if (localAdminToken && message.isSimulated) {
+            return;
+          }
           
           if (message.type === 'INIT_STATE') {
             setPlants(message.plants);
