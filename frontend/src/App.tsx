@@ -1111,7 +1111,7 @@ export default function App() {
 
       {/* Modal d'Authentification Administrateur */}
       {showAuthModal && (
-        <div className="modal-overlay">
+        <div className="modal-backdrop">
           <div className="modal-content auth-modal">
             <div className="modal-header">
               <div className="modal-title-group">
