@@ -12,7 +12,8 @@ const char* password = "VOTRE_MOT_DE_PASSE_WIFI";
 // Exemple prod : "plantwatering-production.up.railway.app"
 const char* ws_host = "192.168.1.50"; 
 const int ws_port = 3001; // Port par défaut pour Express
-const char* ws_path = "/ws?clientType=esp32";
+const char* ws_token = "VOTRE_MOT_DE_PASSE_WIFI_OU_ADMIN"; // Le même que ADMIN_PASSWORD sur le backend
+const String ws_path = String("/ws?clientType=esp32&token=") + ws_token;
 const bool is_secure = false; // Mettez à true pour wss:// (Railway en production)
 
 // --- CONFIGURATION DU MATÉRIEL (GPIO) ---
@@ -76,10 +77,12 @@ void setup() {
 
   // Configuration du client WebSocket
   if (is_secure) {
-    // webSocket.beginSSL(ws_host, 443, ws_path); // Pour la production HTTPS
-    Serial.println("WebSocket configuré en mode sécurisé (WSS) non supporté nativement sans certs sur ESP32.");
+    // Connexion WSS (Sécurisée) pour Railway (Port 443)
+    // Les guillemets vides désactivent la vérification stricte du certificat SSL pour simplifier
+    webSocket.beginSSL(ws_host, 443, ws_path.c_str(), "", ""); 
+    Serial.println("WebSocket configuré en mode sécurisé (WSS) pour la production.");
   } else {
-    webSocket.begin(ws_host, ws_port, ws_path);
+    webSocket.begin(ws_host, ws_port, ws_path.c_str());
   }
   
   webSocket.onEvent(webSocketEvent);

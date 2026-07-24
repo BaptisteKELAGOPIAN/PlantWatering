@@ -37,14 +37,37 @@ app.use(cors({
   credentials: true
 }));
 
-import { ADMIN_PASSWORD } from './middleware/auth';
+import { ADMIN_PASSWORD, safeComparePassword } from './middleware/auth';
+import rateLimit from 'express-rate-limit';
+
+// Configurer Express pour faire confiance au proxy (ex: Railway, Vercel)
+// Nécessaire pour que express-rate-limit récupère la bonne IP du client
+app.set('trust proxy', 1);
 
 app.use(express.json());
 
+// Limiteur de requêtes global (pour éviter le flood sur l'API)
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 300, // Limite à 300 requêtes par IP
+  message: { error: 'Trop de requêtes, veuillez réessayer plus tard.' }
+});
+
+// Limiteur ultra strict anti brute-force pour le login
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // Max 10 tentatives de mot de passe par IP toutes les 15 minutes
+  message: { success: false, error: 'Trop de tentatives de connexion échouées. Réessayez dans 15 minutes.' }
+});
+
+// Appliquer le limiteur global aux routes API
+app.use('/api/', apiLimiter);
+
 // Endpoint d'authentification Admin
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', loginLimiter, (req, res) => {
   const { password } = req.body;
-  if (password === ADMIN_PASSWORD) {
+  
+  if (safeComparePassword(password)) {
     res.json({ success: true, token: ADMIN_PASSWORD });
   } else {
     res.status(401).json({ success: false, error: 'Mot de passe administrateur incorrect' });

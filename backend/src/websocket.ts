@@ -2,7 +2,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { IncomingMessage } from 'http';
 import prisma from './prisma';
 import url from 'url';
-import { ADMIN_PASSWORD } from './middleware/auth';
+import { ADMIN_PASSWORD, safeComparePassword } from './middleware/auth';
 
 // Ensembles pour suivre les connexions actives
 const dashboardClients = new Set<WebSocket>();
@@ -58,6 +58,14 @@ export function setupWebSocket(server: any) {
     console.log(`Nouvelle connexion WebSocket établie. Type: ${clientType}`);
 
     if (clientType === 'esp32') {
+      // Fix timing attack here
+      const esp32Token = Array.isArray(parameters.token) ? parameters.token[0] : parameters.token;
+      if (!safeComparePassword(esp32Token)) {
+        console.warn(`[WebSocket ESP32 Bloqué] Tentative de connexion non autorisée (Mauvais token)`);
+        ws.close(1008, 'Token invalide pour ESP32');
+        return;
+      }
+
       // Déconnecter l'ancien ESP32 s'il y en avait un
       if (esp32Client) {
         esp32Client.close();
@@ -183,8 +191,8 @@ async function handleEsp32Message(data: any, ws: WebSocket) {
           ? Date.now() - new Date(lastWatering.createdAt).getTime()
           : Infinity;
 
-        // 15 minutes = 900 000 ms
-        if (timeSinceLastWatering > 900000) {
+        // Securité: Pas plus d'un arrosage par jour (18 heures = 64 800 000 ms)
+        if (timeSinceLastWatering > 64800000) {
           responseActions.push({
             pinNumber: plant.pinNumber,
             triggerWatering: true,
@@ -223,28 +231,70 @@ async function handleEsp32Message(data: any, ws: WebSocket) {
   }
 }
 
+// Suivi anti brute-force pour les WebSockets
+const wsFailedAttempts = new WeakMap<WebSocket, number>();
+
 // Traite les messages reçus du Dashboard
 async function handleDashboardMessage(data: any, ws?: WebSocket) {
   // Déclencher un arrosage manuel depuis le dashboard
   if (data.type === 'TRIGGER_WATERING') {
     const { plantId, duration, token } = data;
 
-    if (token !== ADMIN_PASSWORD) {
+    if (!safeComparePassword(token)) {
       if (ws) {
+        const attempts = (wsFailedAttempts.get(ws) || 0) + 1;
+        wsFailedAttempts.set(ws, attempts);
+
+        if (attempts >= 5) {
+          ws.send(JSON.stringify({
+            type: 'ERROR',
+            message: 'Trop de tentatives de mot de passe échouées. Votre connexion est bloquée.'
+          }));
+          ws.close(1008, 'Brute force detecté');
+          return;
+        }
+
         ws.send(JSON.stringify({
           type: 'ERROR',
-          message: 'Arrosage manuel impossible en mode Démo. Veuillez vous connecter en Administrateur.'
+          message: `Mot de passe incorrect (Tentative ${attempts}/5). Arrosage impossible.`
         }));
       }
       return;
     }
 
+    // Mot de passe correct, on réinitialise les tentatives
+    if (ws) wsFailedAttempts.delete(ws);
+
     const plant = await prisma.plant.findUnique({
       where: { id: Number(plantId) }
     });
 
+    if (plant) {
+      // Securité: Pas plus d'un arrosage par jour (18h) même en manuel
+      const lastWatering = await prisma.wateringLog.findFirst({
+        where: { plantId: plant.id },
+        orderBy: { createdAt: 'desc' }
+      });
+      const timeSinceLastWatering = lastWatering
+        ? Date.now() - new Date(lastWatering.createdAt).getTime()
+        : Infinity;
+
+      if (timeSinceLastWatering <= 64800000) {
+        if (ws) {
+          ws.send(JSON.stringify({
+            type: 'ERROR',
+            message: 'Sécurité : Cette plante a déjà été arrosée il y a moins de 18h.'
+          }));
+        }
+        return;
+      }
+    }
+
+    // Securité: Plafonner la durée d'arrosage manuel à 60 secondes maximum
+    const safeDuration = Math.min(Math.max(Number(duration) || 0, 1), 60);
+
     if (plant && esp32Client) {
-      console.log(`Commande d'arrosage manuel reçue pour la plante ${plant.name} (Pin ${plant.pinNumber}) pendant ${duration}s`);
+      console.log(`Commande d'arrosage manuel reçue pour la plante ${plant.name} (Pin ${plant.pinNumber}) pendant ${safeDuration}s`);
       
       // 1. Envoyer l'ordre à l'ESP32 en temps réel
       esp32Client.send(JSON.stringify({
@@ -253,7 +303,7 @@ async function handleDashboardMessage(data: any, ws?: WebSocket) {
           {
             pinNumber: plant.pinNumber,
             triggerWatering: true,
-            duration: Number(duration)
+            duration: safeDuration
           }
         ]
       }));
@@ -262,7 +312,7 @@ async function handleDashboardMessage(data: any, ws?: WebSocket) {
       await prisma.wateringLog.create({
         data: {
           plantId: plant.id,
-          duration: Number(duration),
+          duration: safeDuration,
           mode: 'MANUAL'
         }
       });
@@ -272,7 +322,7 @@ async function handleDashboardMessage(data: any, ws?: WebSocket) {
         type: 'WATERING_EVENT',
         plantId: plant.id,
         pinNumber: plant.pinNumber,
-        duration: Number(duration),
+        duration: safeDuration,
         mode: 'MANUAL',
         createdAt: new Date()
       });
