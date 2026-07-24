@@ -71,18 +71,32 @@ export default function App() {
 
   const socketRef = useRef<WebSocket | null>(null);
 
-  // Déterminer les URLs d'API et WebSocket en fonction de l'environnement (Variables Vercel ou Fallback)
+  // Déterminer et formater automatiquement les URLs d'API et WebSocket
   const isProd = import.meta.env.PROD;
   const envBackendUrl = import.meta.env.VITE_BACKEND_URL;
   const envWsUrl = import.meta.env.VITE_WS_URL;
 
-  const backendUrl = envBackendUrl || (isProd 
-    ? 'https://plantwatering-production.up.railway.app'
-    : `http://${window.location.hostname}:3001`);
+  const backendUrl = (() => {
+    if (!envBackendUrl) {
+      return isProd ? window.location.origin : `http://${window.location.hostname}:3001`;
+    }
+    let url = envBackendUrl.trim().replace(/\/+$/, '');
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = `https://${url}`;
+    }
+    return url;
+  })();
 
-  const wsUrl = envWsUrl || (isProd
-    ? 'wss://plantwatering-production.up.railway.app/ws?clientType=dashboard'
-    : `ws://${window.location.hostname}:3001/ws?clientType=dashboard`);
+  const wsUrl = (() => {
+    if (!envWsUrl || !envWsUrl.includes('/ws')) {
+      const wsBase = backendUrl.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:');
+      return `${wsBase}/ws?clientType=dashboard`;
+    }
+    let url = envWsUrl.trim();
+    if (url.startsWith('http://')) url = url.replace('http://', 'ws://');
+    if (url.startsWith('https://')) url = url.replace('https://', 'wss://');
+    return url;
+  })();
 
   // 0. Test de santé du serveur (Ping /health)
   const checkHealth = async () => {
