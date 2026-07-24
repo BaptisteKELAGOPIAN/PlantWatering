@@ -71,15 +71,18 @@ export default function App() {
 
   const socketRef = useRef<WebSocket | null>(null);
 
-  // Déterminer les URLs d'API et WebSocket en fonction de l'environnement
+  // Déterminer les URLs d'API et WebSocket en fonction de l'environnement (Variables Vercel ou Fallback)
   const isProd = import.meta.env.PROD;
-  const backendUrl = isProd 
-    ? 'https://plantwatering-production.up.railway.app' // Remplacer par l'URL finale de production
-    : `http://${window.location.hostname}:3001`;
+  const envBackendUrl = import.meta.env.VITE_BACKEND_URL;
+  const envWsUrl = import.meta.env.VITE_WS_URL;
 
-  const wsUrl = isProd
-    ? 'wss://plantwatering-production.up.railway.app/ws?clientType=dashboard' // Remplacer par l'URL finale de production
-    : `ws://${window.location.hostname}:3001/ws?clientType=dashboard`;
+  const backendUrl = envBackendUrl || (isProd 
+    ? 'https://plantwatering-production.up.railway.app'
+    : `http://${window.location.hostname}:3001`);
+
+  const wsUrl = envWsUrl || (isProd
+    ? 'wss://plantwatering-production.up.railway.app/ws?clientType=dashboard'
+    : `ws://${window.location.hostname}:3001/ws?clientType=dashboard`);
 
   // 1. Charger les plantes initialement par API REST
   const fetchPlants = async () => {

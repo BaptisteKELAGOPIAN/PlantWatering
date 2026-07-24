@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: plantwatering-backend
+    env: node
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: PORT
+        value: 3001
+      - key: DATABASE_URL
+        value: file:./dev.db

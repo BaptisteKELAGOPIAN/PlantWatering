@@ -8,7 +8,7 @@ import prisma from './prisma';
 
 dotenv.config();
 
-const app = express();
+export const app = express();
 const port = process.env.PORT || 3001;
 
 // Configuration CORS - autorise le frontend en local et en production sur Vercel
