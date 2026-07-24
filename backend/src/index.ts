@@ -87,10 +87,11 @@ const server = http.createServer(app);
 
 // Initialisation de la couche WebSocket
 setupWebSocket(server);
+const simulatedMoisture = new Map<number, number>();
 
 // Fonction de simulation d'humidité en arrière-plan (Données fictives)
 function startSimulation() {
-  console.log("Simulateur d'humidité démarré (Données fictives actives)...");
+  console.log("Simulateur d'humidité démarré (Données fictives en mémoire uniquement)...");
   
   setInterval(async () => {
     try {
@@ -106,13 +107,16 @@ function startSimulation() {
       const globalAutoWater = systemConfig?.globalAutoWater ?? true;
 
       for (const plant of plants) {
-        // 1. Lire la dernière mesure d'humidité
-        const lastTelemetry = await prisma.telemetry.findFirst({
-          where: { plantId: plant.id },
-          orderBy: { createdAt: 'desc' }
-        });
+        // 1. Lire la mesure d'humidité simulée ou initiale
+        if (!simulatedMoisture.has(plant.id)) {
+          const lastTelemetry = await prisma.telemetry.findFirst({
+            where: { plantId: plant.id },
+            orderBy: { createdAt: 'desc' }
+          });
+          simulatedMoisture.set(plant.id, lastTelemetry ? lastTelemetry.moisture : 55.0);
+        }
 
-        let currentMoisture = lastTelemetry ? lastTelemetry.moisture : 55.0;
+        let currentMoisture = simulatedMoisture.get(plant.id)!;
 
         // 2. Diminuer l'humidité pour simuler le dessèchement (0.3% à 1.5% de perte par cycle)
         currentMoisture -= (Math.random() * 1.2 + 0.3);
@@ -120,45 +124,25 @@ function startSimulation() {
         // Éviter des valeurs négatives absurdes
         if (currentMoisture < 8.0) currentMoisture = 8.0;
 
-        // 3. Enregistrer et diffuser la nouvelle valeur
-        const telemetry = await prisma.telemetry.create({
-          data: {
-            plantId: plant.id,
-            moisture: Number(currentMoisture.toFixed(1))
-          }
-        });
+        simulatedMoisture.set(plant.id, currentMoisture);
 
+        // 3. Diffuser la nouvelle valeur SANS SAUVEGARDER EN BASE
         broadcastToDashboards({
           type: 'TELEMETRY_UPDATE',
           plantId: plant.id,
           pinNumber: plant.pinNumber,
-          moisture: telemetry.moisture,
-          createdAt: telemetry.createdAt
+          moisture: Number(currentMoisture.toFixed(1)),
+          createdAt: new Date()
         });
 
         // 4. Arrosage automatique simulé
         if (globalAutoWater && plant.autoWatering && currentMoisture < plant.moistureMin) {
-          console.log(`[SIMULATION] Arrosage auto pour ${plant.name} (Pin ${plant.pinNumber}) : Humidité ${currentMoisture.toFixed(1)}% < Seuil ${plant.moistureMin}%`);
+          console.log(`[SIMULATION] Arrosage auto virtuel pour ${plant.name} (Pin ${plant.pinNumber})`);
 
-          // Enregistrer l'arrosage
-          await prisma.wateringLog.create({
-            data: {
-              plantId: plant.id,
-              duration: plant.wateringDuration,
-              mode: 'AUTO'
-            }
-          });
+          // Remonter l'humidité à 82% après arrosage simulé
+          simulatedMoisture.set(plant.id, 82.0);
 
-          // Remonter l'humidité à 82% après arrosage
-          const newMoisture = 82.0;
-          const newTelemetry = await prisma.telemetry.create({
-            data: {
-              plantId: plant.id,
-              moisture: newMoisture
-            }
-          });
-
-          // Informer les dashboards
+          // Informer les dashboards (SANS SAUVEGARDER EN BASE)
           broadcastToDashboards({
             type: 'WATERING_EVENT',
             plantId: plant.id,
@@ -172,15 +156,15 @@ function startSimulation() {
             type: 'TELEMETRY_UPDATE',
             plantId: plant.id,
             pinNumber: plant.pinNumber,
-            moisture: newTelemetry.moisture,
-            createdAt: newTelemetry.createdAt
+            moisture: 82.0,
+            createdAt: new Date()
           });
         }
       }
     } catch (error) {
-      console.error("Erreur boucle simulation :", error);
+      console.error('Erreur lors de la simulation:', error);
     }
-  }, 10000); // Exécution toutes les 10 secondes
+  }, 10000); // Exécuté toutes les 10 secondes
 }
 
 // Fonction de démarrage pour s'assurer que la base est accessible et pré-remplie

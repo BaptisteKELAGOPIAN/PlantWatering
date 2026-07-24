@@ -467,10 +467,15 @@ export default function App() {
             <span>Serveur : {backendConnected ? 'En ligne' : 'Hors ligne'}</span>
           </div>
 
-          <div className={`status-badge ${!backendConnected ? 'offline' : (isRealEsp32 ? 'online' : 'simulator')}`}>
+          <div className={`status-badge ${!backendConnected ? 'offline' : (isRealEsp32 ? 'online' : (adminToken ? 'offline' : 'simulator'))}`}>
             <Activity className="status-icon" />
             <span>
-              ESP32 : {!backendConnected ? 'Non connecté' : (isRealEsp32 ? 'Physique' : 'Mode Simulateur')}
+              ESP32 : {!backendConnected 
+                ? 'Non connecté' 
+                : (isRealEsp32 
+                    ? 'Connecté (Physique)' 
+                    : (adminToken ? 'Déconnecté' : 'Mode Simulateur')
+                  )}
             </span>
           </div>
         </div>
